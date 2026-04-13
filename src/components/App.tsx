@@ -14,7 +14,7 @@ export function App({ tools, resumeSessionId }: AppProps) {
       <Box borderStyle="single" borderColor="cyan" paddingX={1}>
         <Text color="cyan" bold>Mini Agent</Text>
         <Text> — </Text>
-        <Text dimColor>Minimal coding assistant (Ctrl+C to exit)</Text>
+        <Text dimColor>{tools.length} tools loaded (Ctrl+C to exit)</Text>
       </Box>
       <REPL tools={tools} resumeSessionId={resumeSessionId} />
     </Box>

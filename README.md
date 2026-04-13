@@ -32,7 +32,8 @@ TUI 渲染（Ink + React）
 
 ## 功能
 
-- **三工具闭环**：读文件 (`read_file`)、写文件 (`write_file`)、执行命令 (`bash`)
+- **工具闭环**：内置读文件 (`read_file`)、写文件 (`write_file`)、执行命令 (`bash`)
+- **工具扩展**：在 `tools/` 目录放入 `.ts` 文件即可自动加载自定义工具，零配置
 - **流式输出**：模型响应边生成边显示
 - **自主多轮**：模型可连续调用工具（最多 50 轮），自主完成复杂任务
 - **对话持久化**：自动保存会话到磁盘，支持 `--resume` 恢复
@@ -99,27 +100,31 @@ npm start -- --list
 ## 项目结构
 
 ```
-src/
-├── cli.ts                    # 入口：参数解析 + 环境验证
-├── main.tsx                  # Ink 渲染入口
-├── prompts.ts                # 系统提示词
-├── storage.ts                # 会话持久化（JSON 文件）
-├── types.ts                  # 核心类型定义
-├── components/
-│   ├── App.tsx               # 顶层容器
-│   ├── REPL.tsx              # 主交互循环
-│   ├── MessageList.tsx       # 消息渲染
-│   └── PromptInput.tsx       # 输入组件
-├── core/
-│   ├── queryLoop.ts          # 核心 Agent 循环（AsyncGenerator）
-│   ├── openaiAdapter.ts      # OpenAI API 流式适配
-│   ├── messagePipeline.ts    # 消息组装 + 截断
-│   └── toolRunner.ts         # 工具调度（读写分离并发）
-└── tools/
-    ├── types.ts              # Tool 接口定义
-    ├── readTool.ts           # 文件读取
-    ├── writeTool.ts          # 文件写入
-    └── bashTool.ts           # Shell 命令执行
+├── tools/                       # ← 自定义工具放这里（自动加载）
+│   ├── _template.ts             #   工具开发模板（_开头的文件会被忽略）
+│   └── fetchTool.ts             #   示例：HTTP 请求工具
+├── src/
+│   ├── cli.ts                   # 入口：参数解析 + 环境验证
+│   ├── main.tsx                 # Ink 渲染入口
+│   ├── prompts.ts               # 系统提示词（动态列出已加载工具）
+│   ├── storage.ts               # 会话持久化（JSON 文件）
+│   ├── types.ts                 # 核心类型定义
+│   ├── components/
+│   │   ├── App.tsx              # 顶层容器
+│   │   ├── REPL.tsx             # 主交互循环
+│   │   ├── MessageList.tsx      # 消息渲染
+│   │   └── PromptInput.tsx      # 输入组件
+│   ├── core/
+│   │   ├── queryLoop.ts         # 核心 Agent 循环（AsyncGenerator）
+│   │   ├── openaiAdapter.ts     # OpenAI API 流式适配
+│   │   ├── messagePipeline.ts   # 消息组装 + 截断
+│   │   ├── toolRunner.ts        # 工具调度（读写分离并发）
+│   │   └── toolLoader.ts        # 工具动态加载器
+│   └── tools/
+│       ├── types.ts             # Tool 接口定义
+│       ├── readTool.ts          # 内置：文件读取
+│       ├── writeTool.ts         # 内置：文件写入
+│       └── bashTool.ts          # 内置：Shell 命令执行
 ```
 
 ## 设计解读
@@ -153,7 +158,7 @@ REPL (React state)          queryLoop                    OpenAI API
 | `model` | `.env` 中配置的模型名 |
 | `stream` | `true`（流式） |
 | `messages` | `[system, ...对话历史]`，随工具循环不断增长 |
-| `tools` | 3 个工具的 JSON Schema 定义（固定不变） |
+| `tools` | 所有已加载工具的 JSON Schema 定义（内置 + 自定义） |
 
 ### 与 Claude Code 原版对比
 
@@ -162,33 +167,94 @@ REPL (React state)          queryLoop                    OpenAI API
 | 源文件数 | ~1919 | 16 |
 | 依赖数 | 50+ | 6 |
 | 消息类型 | 20+ 种内部类型 + API 格式转换 | 4 种，直接用 OpenAI 格式 |
-| 工具数 | 30+ (动态加载) | 3 (静态注册) |
+| 工具数 | 30+ (动态加载) | 3 内置 + 自定义扩展 (动态加载) |
 | 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 消息数量滑动窗口 |
 | API 支持 | Anthropic / AWS Bedrock / Google Vertex | 任意 OpenAI 兼容 |
 | 权限系统 | 精细的工具权限审批 | 无限制 |
 | 扩展机制 | MCP / Plugin / Skill / Agent Swarm | 无 |
 | 会话恢复 | 支持 (`--resume`) | 支持 (`--resume`) |
 
-## 如何扩展
+## 自定义工具
 
-Mini Agent 设计为易于扩展的起点：
+Mini Agent 支持动态加载自定义工具。只需在指定目录放入 `.ts` / `.js` 文件，启动时自动发现和加载，无需修改任何源码。
 
-**添加新工具**：在 `src/tools/` 创建文件，实现 `Tool` 接口，在 `main.tsx` 注册即可。
+### 快速添加
+
+1. 复制模板：
+```bash
+cp tools/_template.ts tools/myTool.ts
+```
+
+2. 编辑 `tools/myTool.ts`，实现你的工具逻辑
+
+3. 重启 agent — 启动时会显示 `[tool-loader] Loaded 1 custom tool(s): my_tool`
+
+### 工具目录
+
+| 目录 | 用途 | 是否 git 跟踪 |
+|---|---|---|
+| `tools/` | 项目级自定义工具 | 是（可分享） |
+| `.mini-agent/tools/` | 用户级自定义工具 | 否（已 gitignore） |
+
+两个目录都会被扫描。以 `_` 开头的文件会被忽略（可用于模板和草稿）。
+
+### Tool 接口
 
 ```typescript
-// src/tools/myTool.ts
-import type { Tool } from './types.js'
+interface Tool {
+  name: string                                      // 工具名（模型调用时使用）
+  description: string                               // 工具描述（模型读这个决定何时用）
+  parameters: Record<string, unknown>               // JSON Schema 定义入参
+  call(args: Record<string, unknown>): Promise<string>  // 执行逻辑，返回字符串结果
+  isReadOnly(args: Record<string, unknown>): boolean    // 是否只读（只读工具可并发）
+}
+```
 
-export const myTool: Tool = {
-  name: 'my_tool',
-  description: '...',
-  parameters: { /* JSON Schema */ },
-  async call(args) { return 'result' },
+### 导出方式
+
+以下三种导出方式都支持：
+
+```typescript
+// 方式 1：命名导出（推荐）
+export const tool: Tool = { ... }
+
+// 方式 2：默认导出
+export default { ... } satisfies Tool
+
+// 方式 3：任意命名导出（取第一个）
+export const myCustomTool: Tool = { ... }
+```
+
+### 示例：HTTP 请求工具
+
+项目自带了一个 `tools/fetchTool.ts` 示例，让 agent 能访问 URL：
+
+```typescript
+export const tool: Tool = {
+  name: 'fetch_url',
+  description: 'Fetch the content of a URL and return it as text.',
+  parameters: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'The URL to fetch' },
+      method: { type: 'string', description: 'HTTP method. Defaults to GET.' },
+    },
+    required: ['url'],
+  },
+  async call(args) {
+    const response = await fetch(args.url as string)
+    return await response.text()
+  },
   isReadOnly() { return true },
 }
 ```
 
-**其他扩展方向**：
+### 覆盖内置工具
+
+自定义工具可以通过同名覆盖内置工具。比如创建一个 `tools/bashTool.ts`，导出 `name: 'bash'` 的工具，就会替换内置的 bash 工具。
+
+### 更多扩展方向
+
 - Token 级别的上下文压缩
 - 工具权限审批机制
 - MCP 协议支持

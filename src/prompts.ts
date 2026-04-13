@@ -1,7 +1,7 @@
 import * as os from 'os'
-import * as path from 'path'
+import type { Tool } from './tools/types.js'
 
-export function getSystemPrompt(): string {
+export function getSystemPrompt(tools?: Tool[]): string {
   const cwd = process.cwd()
   const platform = os.platform()
   const shell = process.platform === 'win32' ? 'powershell' : os.userInfo().shell || '/bin/bash'
@@ -12,12 +12,14 @@ export function getSystemPrompt(): string {
     day: 'numeric',
   })
 
+  const toolList = tools
+    ? tools.map((t) => `- ${t.name}: ${t.description.split('.')[0]}`).join('\n')
+    : '- read_file: Read files from the filesystem\n- write_file: Create or overwrite files\n- bash: Execute shell commands'
+
   return `You are a coding assistant running in a terminal. You help users with software engineering tasks by reading files, writing code, and executing commands.
 
 You have access to these tools:
-- read_file: Read files from the filesystem
-- write_file: Create or overwrite files
-- bash: Execute shell commands
+${toolList}
 
 Environment:
 - CWD: ${cwd}
@@ -31,5 +33,6 @@ Guidelines:
 - Be concise in responses — show code, not explanations of code
 - When running commands, prefer non-interactive flags
 - If a task requires multiple steps, work through them methodically using tools
-- After making changes, verify them (e.g., read the file back, run tests)`
+- After making changes, verify them (e.g., read the file back, run tests)
+- Use the most appropriate tool for each task`
 }

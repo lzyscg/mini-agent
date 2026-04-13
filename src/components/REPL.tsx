@@ -59,7 +59,7 @@ export function REPL({ tools, resumeSessionId }: REPLProps) {
           userMessage: userInput,
           history: messages,
           tools,
-          systemPrompt: getSystemPrompt(),
+          systemPrompt: getSystemPrompt(tools),
         })
 
         for await (const event of gen) {

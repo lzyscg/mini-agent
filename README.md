@@ -103,10 +103,15 @@ npm start -- --list
 ├── tools/                       # ← 自定义工具放这里（自动加载）
 │   ├── _template.ts             #   工具开发模板（_开头的文件会被忽略）
 │   └── fetchTool.ts             #   示例：HTTP 请求工具
+├── skills/                      # ← Skill 放这里（自动加载 + 关键词匹配）
+│   ├── _template.md             #   Skill 开发模板
+│   ├── git-workflow.md          #   示例：Git 操作规范
+│   ├── code-review.md           #   示例：代码审查流程
+│   └── project-init.md          #   示例：项目初始化指引
 ├── src/
 │   ├── cli.ts                   # 入口：参数解析 + 环境验证
 │   ├── main.tsx                 # Ink 渲染入口
-│   ├── prompts.ts               # 系统提示词（动态列出已加载工具）
+│   ├── prompts.ts               # 系统提示词（动态列出工具 + skills）
 │   ├── storage.ts               # 会话持久化（JSON 文件）
 │   ├── types.ts                 # 核心类型定义
 │   ├── components/
@@ -119,7 +124,9 @@ npm start -- --list
 │   │   ├── openaiAdapter.ts     # OpenAI API 流式适配
 │   │   ├── messagePipeline.ts   # 消息组装 + 截断
 │   │   ├── toolRunner.ts        # 工具调度（读写分离并发）
-│   │   └── toolLoader.ts        # 工具动态加载器
+│   │   ├── toolLoader.ts        # 工具动态加载器
+│   │   ├── skillLoader.ts       # Skill 加载器（扫描 + 解析 frontmatter）
+│   │   └── skillMatcher.ts      # Skill 匹配器（关键词 → 注入上下文）
 │   └── tools/
 │       ├── types.ts             # Tool 接口定义
 │       ├── readTool.ts          # 内置：文件读取
@@ -252,6 +259,74 @@ export const tool: Tool = {
 ### 覆盖内置工具
 
 自定义工具可以通过同名覆盖内置工具。比如创建一个 `tools/bashTool.ts`，导出 `name: 'bash'` 的工具，就会替换内置的 bash 工具。
+
+## Skills 技能系统
+
+Skills 是给模型的"操作指南"。当用户输入匹配到某个 skill 的触发关键词时，skill 的完整内容会被自动注入到对话上下文中，引导模型按照最佳实践执行任务。
+
+### 与工具的区别
+
+| | Tool（工具） | Skill（技能） |
+|---|---|---|
+| 本质 | 可执行的函数 | 提示词/指南文档 |
+| 格式 | `.ts` / `.js` 文件 | `.md` Markdown 文件 |
+| 作用 | 给模型新的"动作能力" | 给模型"如何做好某事"的知识 |
+| 注入方式 | 作为 `tools` 参数发给 API | 作为上下文消息注入 messages |
+| 示例 | `read_file`, `bash` | "Git 提交规范", "代码审查流程" |
+
+### 快速添加
+
+1. 在 `skills/` 目录创建 `.md` 文件：
+
+```markdown
+---
+name: My Skill
+description: Brief description
+triggers: keyword1, keyword2, keyword3
+---
+
+# Skill Content
+
+When the user asks about this topic, follow these guidelines:
+- Step 1...
+- Step 2...
+```
+
+2. 重启 agent — 自动加载
+
+### Skill 目录
+
+| 目录 | 用途 |
+|---|---|
+| `skills/` | 项目级（可 git 跟踪，团队共享） |
+| `.mini-agent/skills/` | 用户级（已 gitignore） |
+
+### 工作原理
+
+```
+用户输入 "帮我 commit 这个改动"
+       │
+       ▼
+skillMatcher 扫描所有 skill 的 triggers
+       │
+       ├── git-workflow.md triggers: [git, commit, branch, ...]
+       │   "commit" 命中 → score: 2
+       │
+       ▼
+命中的 skill 内容注入到 messages 中：
+[system, skillContext, assistantAck, ...history, userMsg]
+       │
+       ▼
+模型看到 skill 指南 → 按照规范执行 git 操作
+```
+
+### 内置示例 Skills
+
+| Skill | 触发词 | 作用 |
+|---|---|---|
+| Git Workflow | git, commit, branch, merge... | Git 操作规范和安全实践 |
+| Code Review | review, refactor, improve... | 代码审查的系统化流程 |
+| Project Init | init, create, scaffold, setup... | 项目初始化最佳实践 |
 
 ### 更多扩展方向
 

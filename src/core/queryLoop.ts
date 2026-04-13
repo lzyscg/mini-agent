@@ -1,8 +1,10 @@
 import type { Message, AssistantMessage, QueryEvent } from '../types.js'
 import type { Tool } from '../tools/types.js'
+import type { Skill } from './skillLoader.js'
 import { callModelStreaming } from './openaiAdapter.js'
 import { runTools } from './toolRunner.js'
 import { buildMessages, truncateMessages } from './messagePipeline.js'
+import { matchSkills, formatSkillContext } from './skillMatcher.js'
 
 const MAX_CONTEXT_MESSAGES = 100
 const MAX_TURNS = 50
@@ -11,6 +13,7 @@ export interface QueryParams {
   userMessage: string
   history: Message[]
   tools: Tool[]
+  skills: Skill[]
   systemPrompt: string
 }
 
@@ -21,13 +24,30 @@ export interface QueryParams {
 export async function* queryLoop(
   params: QueryParams,
 ): AsyncGenerator<QueryEvent> {
-  const { userMessage, tools, systemPrompt } = params
+  const { userMessage, tools, skills, systemPrompt } = params
 
   let messages: Message[] = buildMessages(
     systemPrompt,
     params.history,
     { role: 'user', content: userMessage },
   )
+
+  // Match skills based on user input and inject as context
+  if (skills.length > 0) {
+    const matched = matchSkills(userMessage, skills)
+    if (matched.length > 0) {
+      const skillContext = formatSkillContext(matched)
+      // Insert skill context right after the system message
+      const systemMsg = messages[0]!
+      const rest = messages.slice(1)
+      messages = [
+        systemMsg,
+        { role: 'user', content: skillContext },
+        { role: 'assistant', content: 'I will follow the activated skill guidelines.' },
+        ...rest,
+      ]
+    }
+  }
 
   let turnCount = 0
 
@@ -67,14 +87,12 @@ export async function* queryLoop(
       return
     }
 
-    // Emit tool_start for each pending tool call
     for (const tc of assistantMsg.tool_calls) {
       yield { type: 'tool_start', toolCall: tc }
     }
 
     const toolResults = await runTools(assistantMsg.tool_calls, tools)
 
-    // Emit tool_end for each result
     for (const result of toolResults) {
       yield {
         type: 'tool_end',

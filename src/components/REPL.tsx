@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Box, Text } from 'ink'
 import type { Message } from '../types.js'
 import type { Tool } from '../tools/types.js'
+import type { Skill } from '../core/skillLoader.js'
 import { queryLoop } from '../core/queryLoop.js'
 import { getSystemPrompt } from '../prompts.js'
 import { MessageList } from './MessageList.js'
@@ -14,10 +15,11 @@ import {
 
 interface REPLProps {
   tools: Tool[]
+  skills: Skill[]
   resumeSessionId?: string
 }
 
-export function REPL({ tools, resumeSessionId }: REPLProps) {
+export function REPL({ tools, skills, resumeSessionId }: REPLProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -59,7 +61,8 @@ export function REPL({ tools, resumeSessionId }: REPLProps) {
           userMessage: userInput,
           history: messages,
           tools,
-          systemPrompt: getSystemPrompt(tools),
+          skills,
+          systemPrompt: getSystemPrompt(tools, skills),
         })
 
         for await (const event of gen) {
@@ -111,7 +114,7 @@ export function REPL({ tools, resumeSessionId }: REPLProps) {
         setStreamingText('')
       }
     },
-    [messages, isLoading, tools],
+    [messages, isLoading, tools, skills],
   )
 
   if (!sessionReady) {

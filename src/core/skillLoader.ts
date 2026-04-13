@@ -1,22 +1,18 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
-export interface Skill {
-  /** Unique identifier derived from filename */
+/**
+ * Lightweight skill metadata — loaded eagerly at startup.
+ * Content is NOT loaded here (deferred to call time).
+ */
+export interface SkillMeta {
   id: string
   name: string
   description: string
-  /** Keywords that trigger this skill */
   triggers: string[]
-  /** Full markdown content (excluding frontmatter) */
-  content: string
-  /** Source file path */
   source: string
 }
 
-/**
- * Directories to scan for skill files (.md with YAML frontmatter).
- */
 function getSkillDirs(): string[] {
   const cwd = process.cwd()
   return [
@@ -26,18 +22,7 @@ function getSkillDirs(): string[] {
 }
 
 /**
- * Parse YAML-like frontmatter from a markdown string.
- * Supports: name, description, triggers (as comma-separated or YAML list).
- *
- * Format:
- * ```
- * ---
- * name: My Skill
- * description: What this skill does
- * triggers: keyword1, keyword2, keyword3
- * ---
- * (markdown content)
- * ```
+ * Parse YAML-like frontmatter, returning metadata and raw content separately.
  */
 function parseFrontmatter(raw: string): {
   meta: Record<string, string>
@@ -49,16 +34,15 @@ function parseFrontmatter(raw: string): {
   }
 
   const meta: Record<string, string> = {}
-  const lines = match[1]!.split('\n')
-
-  for (const line of lines) {
+  for (const line of match[1]!.split('\n')) {
     const colonIdx = line.indexOf(':')
     if (colonIdx === -1) continue
     const key = line.slice(0, colonIdx).trim()
     let value = line.slice(colonIdx + 1).trim()
-    // Strip surrounding quotes
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1)
     }
     meta[key] = value
@@ -68,7 +52,6 @@ function parseFrontmatter(raw: string): {
 }
 
 function parseTriggers(raw: string): string[] {
-  // Support both "a, b, c" and YAML list "- a\n- b\n- c"
   if (raw.includes('\n')) {
     return raw
       .split('\n')
@@ -81,14 +64,14 @@ function parseTriggers(raw: string): string[] {
     .filter(Boolean)
 }
 
-async function loadSkillsFromDir(dir: string): Promise<Skill[]> {
-  const skills: Skill[] = []
+async function loadMetaFromDir(dir: string): Promise<SkillMeta[]> {
+  const metas: SkillMeta[] = []
 
   let entries: string[]
   try {
     entries = await fs.readdir(dir)
   } catch {
-    return skills
+    return metas
   }
 
   const mdFiles = entries.filter(
@@ -101,51 +84,56 @@ async function loadSkillsFromDir(dir: string): Promise<Skill[]> {
       const raw = await fs.readFile(filePath, 'utf-8')
       const { meta, content } = parseFrontmatter(raw)
 
-      if (!content) {
-        console.warn(`[skill-loader] Skipping ${file}: empty content`)
-        continue
-      }
+      if (!content) continue
 
       const id = file.replace(/\.md$/, '')
-      const name = meta.name || id
-      const description = meta.description || content.slice(0, 100)
-      const triggers = meta.triggers ? parseTriggers(meta.triggers) : [id]
-
-      skills.push({ id, name, description, triggers, content, source: filePath })
+      metas.push({
+        id,
+        name: meta.name || id,
+        description: meta.description || content.slice(0, 100),
+        triggers: meta.triggers ? parseTriggers(meta.triggers) : [id],
+        source: filePath,
+      })
     } catch (err) {
       console.warn(
-        `[skill-loader] Failed to load ${filePath}: ${(err as Error).message}`,
+        `[skill-loader] Failed to parse ${filePath}: ${(err as Error).message}`,
       )
     }
   }
 
-  return skills
+  return metas
 }
 
 /**
- * Load all skills from skill directories.
+ * Load metadata for all skills (no content — that's deferred).
  */
-export async function loadAllSkills(): Promise<Skill[]> {
+export async function loadAllSkillMeta(): Promise<SkillMeta[]> {
   const dirs = getSkillDirs()
-  const allSkills: Skill[] = []
+  const all: SkillMeta[] = []
 
   for (const dir of dirs) {
-    const skills = await loadSkillsFromDir(dir)
-    allSkills.push(...skills)
+    all.push(...(await loadMetaFromDir(dir)))
   }
 
-  // Deduplicate by id (later directories override earlier ones)
-  const skillMap = new Map<string, Skill>()
-  for (const s of allSkills) {
-    skillMap.set(s.id, s)
+  const map = new Map<string, SkillMeta>()
+  for (const s of all) {
+    map.set(s.id, s)
   }
 
-  const result = [...skillMap.values()]
-
+  const result = [...map.values()]
   if (result.length > 0) {
-    const names = result.map((s) => s.name).join(', ')
-    console.log(`[skill-loader] Loaded ${result.length} skill(s): ${names}`)
+    console.log(
+      `[skill-loader] Found ${result.length} skill(s): ${result.map((s) => s.name).join(', ')}`,
+    )
   }
-
   return result
+}
+
+/**
+ * Lazily load a single skill's full markdown content from disk.
+ */
+export async function loadSkillContent(source: string): Promise<string> {
+  const raw = await fs.readFile(source, 'utf-8')
+  const { content } = parseFrontmatter(raw)
+  return content
 }

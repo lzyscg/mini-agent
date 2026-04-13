@@ -1,10 +1,8 @@
 import type { Message, AssistantMessage, QueryEvent } from '../types.js'
 import type { Tool } from '../tools/types.js'
-import type { Skill } from './skillLoader.js'
 import { callModelStreaming } from './openaiAdapter.js'
 import { runTools } from './toolRunner.js'
 import { buildMessages, truncateMessages } from './messagePipeline.js'
-import { matchSkills, formatSkillContext } from './skillMatcher.js'
 
 const MAX_CONTEXT_MESSAGES = 100
 const MAX_TURNS = 50
@@ -13,41 +11,26 @@ export interface QueryParams {
   userMessage: string
   history: Message[]
   tools: Tool[]
-  skills: Skill[]
   systemPrompt: string
 }
 
 /**
  * Core agent loop: call model → execute tools → repeat until no tool_calls.
  * Yields QueryEvents for the TUI to consume in real-time.
+ *
+ * Skills are now just tools — when the model calls `use_skill`, the content
+ * flows back as a normal tool result and the loop continues naturally.
  */
 export async function* queryLoop(
   params: QueryParams,
 ): AsyncGenerator<QueryEvent> {
-  const { userMessage, tools, skills, systemPrompt } = params
+  const { userMessage, tools, systemPrompt } = params
 
   let messages: Message[] = buildMessages(
     systemPrompt,
     params.history,
     { role: 'user', content: userMessage },
   )
-
-  // Match skills based on user input and inject as context
-  if (skills.length > 0) {
-    const matched = matchSkills(userMessage, skills)
-    if (matched.length > 0) {
-      const skillContext = formatSkillContext(matched)
-      // Insert skill context right after the system message
-      const systemMsg = messages[0]!
-      const rest = messages.slice(1)
-      messages = [
-        systemMsg,
-        { role: 'user', content: skillContext },
-        { role: 'assistant', content: 'I will follow the activated skill guidelines.' },
-        ...rest,
-      ]
-    }
-  }
 
   let turnCount = 0
 

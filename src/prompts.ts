@@ -1,9 +1,7 @@
 import * as os from 'os'
 import type { Tool } from './tools/types.js'
-import type { Skill } from './core/skillLoader.js'
-import { formatSkillIndex } from './core/skillMatcher.js'
 
-export function getSystemPrompt(tools?: Tool[], skills?: Skill[]): string {
+export function getSystemPrompt(tools?: Tool[]): string {
   const cwd = process.cwd()
   const platform = os.platform()
   const shell = process.platform === 'win32' ? 'powershell' : os.userInfo().shell || '/bin/bash'
@@ -15,10 +13,8 @@ export function getSystemPrompt(tools?: Tool[], skills?: Skill[]): string {
   })
 
   const toolList = tools
-    ? tools.map((t) => `- ${t.name}: ${t.description.split('.')[0]}`).join('\n')
+    ? tools.map((t) => `- ${t.name}: ${t.description.split('\n')[0]}`).join('\n')
     : '- read_file: Read files from the filesystem\n- write_file: Create or overwrite files\n- bash: Execute shell commands'
-
-  const skillIndex = skills ? formatSkillIndex(skills) : ''
 
   return `You are a coding assistant running in a terminal. You help users with software engineering tasks by reading files, writing code, and executing commands.
 
@@ -39,5 +35,5 @@ Guidelines:
 - If a task requires multiple steps, work through them methodically using tools
 - After making changes, verify them (e.g., read the file back, run tests)
 - Use the most appropriate tool for each task
-- When skills are activated, follow their specific guidelines${skillIndex}`
+- When you recognize a task that matches an available skill, use the use_skill tool to load specific guidelines before proceeding`
 }

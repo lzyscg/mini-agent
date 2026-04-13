@@ -73,6 +73,9 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 # 可选：模型名称（默认 gpt-4o）
 MODEL_NAME=gpt-4o
 
+# 可选：单次提问内工具循环最大轮次（默认 50）
+MAX_TURNS=50
+
 # 可选：上下文窗口大小（默认 128000）
 CONTEXT_WINDOW_TOKENS=128000
 

@@ -5,7 +5,9 @@ import { runTools } from './toolRunner.js'
 import { buildMessages } from './messagePipeline.js'
 import { compressContext } from './compress/index.js'
 
-const MAX_TURNS = 50
+function getMaxTurns(): number {
+  return parseInt(process.env.MAX_TURNS ?? '50', 10)
+}
 
 export interface QueryParams {
   userMessage: string
@@ -34,7 +36,9 @@ export async function* queryLoop(
 
   let turnCount = 0
 
-  while (turnCount < MAX_TURNS) {
+  const maxTurns = getMaxTurns()
+
+  while (turnCount < maxTurns) {
     turnCount++
 
     const compressed = await compressContext(messages)
@@ -96,5 +100,5 @@ export async function* queryLoop(
     messages = [...messages, ...toolResults]
   }
 
-  yield { type: 'error', error: `Reached maximum turns (${MAX_TURNS})` }
+  yield { type: 'error', error: `Reached maximum turns (${maxTurns})` }
 }

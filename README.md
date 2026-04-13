@@ -1,6 +1,6 @@
 # Mini Agent
 
-一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **~20 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议、Plugin 插件系统和 Hooks 事件机制。
+一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **~27 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议、Plugin 插件系统、Hooks 事件机制和五级渐进式上下文压缩。
 
 ## 为什么做这个
 
@@ -38,6 +38,7 @@ TUI 渲染（Ink + React）
 - **Plugin 系统**：一个插件 = 一个目录，打包 tools + skills + MCP + hooks，支持安装/卸载/启禁用
 - **Hooks 事件**：在工具调用前/后插入自定义逻辑（审批、日志、修改等）
 - **Skills 技能**：Markdown 格式的操作指南，模型按需激活，延迟加载
+- **上下文压缩**：五级渐进式压缩管线（预算截断 → 头部裁剪 → 微压缩 → 折叠摘要 → 全量摘要），自动管理长对话上下文
 - **流式输出**：模型响应边生成边显示
 - **自主多轮**：模型可连续调用工具（最多 50 轮），自主完成复杂任务
 - **对话持久化**：自动保存会话到磁盘，支持 `--resume` 恢复
@@ -71,6 +72,12 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 
 # 可选：模型名称（默认 gpt-4o）
 MODEL_NAME=gpt-4o
+
+# 可选：上下文窗口大小（默认 128000）
+CONTEXT_WINDOW_TOKENS=128000
+
+# 可选：压缩摘要模型（默认跟随 MODEL_NAME）
+COMPACT_MODEL=gpt-4o-mini
 ```
 
 **各服务商配置示例**：
@@ -134,14 +141,22 @@ npm start -- --list
 │   ├── core/
 │   │   ├── queryLoop.ts         # 核心 Agent 循环（AsyncGenerator）
 │   │   ├── openaiAdapter.ts     # OpenAI API 流式适配
-│   │   ├── messagePipeline.ts   # 消息组装 + 截断
+│   │   ├── messagePipeline.ts   # 消息组装
+│   │   ├── tokens.ts            # Token 粗估 + 上下文窗口配置
 │   │   ├── toolRunner.ts        # 工具调度（读写分离 + hooks 集成）
 │   │   ├── toolLoader.ts        # 工具动态加载器
 │   │   ├── mcpClient.ts         # MCP 客户端（连接 + 工具翻译）
 │   │   ├── skillLoader.ts       # Skill 元数据加载 + 延迟内容读取
 │   │   ├── pluginLoader.ts      # 插件发现 + 清单解析 + 组件加载
 │   │   ├── pluginManager.ts     # 插件安装/卸载/启禁用 CLI 操作
-│   │   └── hooks.ts             # Hook 类型定义 + 事件总线
+│   │   ├── hooks.ts             # Hook 类型定义 + 事件总线
+│   │   └── compress/            # 五级上下文压缩管线
+│   │       ├── index.ts         #   管线编排入口
+│   │       ├── toolResultBudget.ts  # L1: 超大工具结果截断
+│   │       ├── snip.ts          #   L2: 头部裁剪旧消息轮次
+│   │       ├── microCompact.ts  #   L3: 清空旧 tool_result
+│   │       ├── contextCollapse.ts   # L4: 折叠旧段为摘要
+│   │       └── autoCompact.ts   #   L5: 全量摘要（最后防线）
 │   └── tools/
 │       ├── types.ts             # Tool 接口定义
 │       ├── readTool.ts          # 内置：文件读取
@@ -191,7 +206,7 @@ REPL (React state)          queryLoop                    OpenAI API
 | 依赖数 | 50+ | 6 |
 | 消息类型 | 20+ 种内部类型 + API 格式转换 | 4 种，直接用 OpenAI 格式 |
 | 工具数 | 30+ (动态加载) | 3 内置 + 自定义扩展 (动态加载) |
-| 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 消息数量滑动窗口 |
+| 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 五级渐进式压缩管线 |
 | API 支持 | Anthropic / AWS Bedrock / Google Vertex | 任意 OpenAI 兼容 |
 | 权限系统 | 精细的工具权限审批 | 无限制 |
 | 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + Plugin + Skill + Hooks |
@@ -550,9 +565,56 @@ export default async function(ctx: HookContext): Promise<void> {
 }
 ```
 
+## 上下文压缩管线
+
+长对话会超出模型的上下文窗口。Mini Agent 实现了五级渐进式压缩管线，在每次调用模型前自动按需压缩，避免丢失关键信息。
+
+### 压缩流程
+
+```
+messages 原始数组
+    │
+    ▼
+1. Tool Result Budget ── 截断超大 tool_result（>30k 字符）
+    │
+    ▼
+2. Snip ── 从头部删除最老的对话轮次（70% 阈值触发）
+    │
+    ▼
+3. Microcompact ── 清空旧 tool_result 内容，保留最近 5 个
+    │
+    ▼
+4. Context Collapse ── 调模型对旧段生成摘要折叠（85% 阈值触发）
+    │
+    ▼
+5. Autocompact ── 全量摘要替换历史（最后防线）
+    │
+    ▼
+callModelStreaming()
+```
+
+### 各层级说明
+
+| 层级 | 触发条件 | 动作 | 是否调模型 |
+|---|---|---|---|
+| L1 Tool Result Budget | 单条 tool_result > 30,000 字符 | 截断到前 2,000 字符 + 提示 | 否 |
+| L2 Snip | 总 token > 窗口 × 70% | 按轮次从头部删除最老消息 | 否 |
+| L3 Microcompact | 始终执行 | 保留最近 5 个 tool_result，清空更早的 | 否 |
+| L4 Context Collapse | 总 token > 窗口 × 85% | 将旧 60% 消息折叠为模型生成的摘要 | 是 |
+| L5 Autocompact | 总 token > 窗口 - 10,000 | 全量对话摘要替换所有历史 | 是 |
+
+### 配置
+
+```env
+# 上下文窗口大小（默认 128000）
+CONTEXT_WINDOW_TOKENS=128000
+
+# 压缩/摘要使用的模型（默认跟随 MODEL_NAME，可指定更便宜的模型）
+COMPACT_MODEL=gpt-4o-mini
+```
+
 ### 更多扩展方向
 
-- Token 级别的上下文压缩
 - 工具权限审批机制
 - 多 Agent 协同
 - 图片/PDF 多模态输入

@@ -69,3 +69,4 @@ export type QueryEvent =
   | { type: 'tool_end'; toolCallId: string; result: string }
   | { type: 'turn_complete'; messages: Message[] }
   | { type: 'error'; error: string }
+  | { type: 'context_compressed'; strategy: string; tokensBefore: number; tokensAfter: number }

@@ -2,9 +2,9 @@ import type { Message, AssistantMessage, QueryEvent } from '../types.js'
 import type { Tool } from '../tools/types.js'
 import { callModelStreaming } from './openaiAdapter.js'
 import { runTools } from './toolRunner.js'
-import { buildMessages, truncateMessages } from './messagePipeline.js'
+import { buildMessages } from './messagePipeline.js'
+import { compressContext } from './compress/index.js'
 
-const MAX_CONTEXT_MESSAGES = 100
 const MAX_TURNS = 50
 
 export interface QueryParams {
@@ -37,7 +37,16 @@ export async function* queryLoop(
   while (turnCount < MAX_TURNS) {
     turnCount++
 
-    messages = truncateMessages(messages, MAX_CONTEXT_MESSAGES)
+    const compressed = await compressContext(messages)
+    messages = compressed.messages
+    if (compressed.strategy) {
+      yield {
+        type: 'context_compressed',
+        strategy: compressed.strategy,
+        tokensBefore: compressed.tokensBefore,
+        tokensAfter: compressed.tokensAfter,
+      }
+    }
 
     let assistantMsg: AssistantMessage | undefined
     try {

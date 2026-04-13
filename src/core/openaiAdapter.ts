@@ -24,6 +24,10 @@ export interface CallModelResult {
   textChunks: string[]
 }
 
+export interface CallModelOptions {
+  model?: string
+}
+
 /**
  * Call the model with streaming, yielding text chunks as they arrive.
  * Returns the fully assembled assistant message (with tool_calls if any).
@@ -31,13 +35,14 @@ export interface CallModelResult {
 export async function* callModelStreaming(
   messages: Message[],
   tools: Tool[],
+  options?: CallModelOptions,
 ): AsyncGenerator<{ type: 'text_delta'; text: string }, CallModelResult> {
   const openai = getClient()
 
   const toolSchemas = tools.map(toolToOpenAISchema)
 
   const stream = await openai.chat.completions.create({
-    model: getModel(),
+    model: options?.model || getModel(),
     messages: messages as OpenAI.ChatCompletionMessageParam[],
     tools: toolSchemas.length > 0 ? toolSchemas : undefined,
     stream: true,

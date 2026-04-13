@@ -70,3 +70,5 @@ export type QueryEvent =
   | { type: 'turn_complete'; messages: Message[] }
   | { type: 'error'; error: string }
   | { type: 'context_compressed'; strategy: string; tokensBefore: number; tokensAfter: number }
+  | { type: 'subagent_start'; description: string }
+  | { type: 'subagent_end'; description: string; result: string }

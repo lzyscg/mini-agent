@@ -4,6 +4,7 @@ import { App } from './components/App.js'
 import { loadAllTools } from './core/toolLoader.js'
 import { loadAllSkillMeta } from './core/skillLoader.js'
 import { createSkillTool } from './tools/skillTool.js'
+import { createAgentTool } from './tools/agentTool.js'
 import { loadMcpTools, closeMcpConnections } from './core/mcpClient.js'
 import { loadAllPlugins } from './core/pluginLoader.js'
 
@@ -30,6 +31,9 @@ export async function startApp(resumeSessionId?: string) {
   if (allSkillMetas.length > 0) {
     tools.push(createSkillTool(allSkillMetas))
   }
+
+  // Sub-agent tool: snapshot current tools so sub-agents get everything except `agent` itself
+  tools.push(createAgentTool([...tools]))
 
   // Clean up MCP connections on exit
   const cleanup = () => { closeMcpConnections().catch(() => {}) }

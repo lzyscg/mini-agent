@@ -1,6 +1,6 @@
 # Mini Agent
 
-一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **~27 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议、Plugin 插件系统、Hooks 事件机制和五级渐进式上下文压缩。
+一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **~28 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持多 Agent 子代理、MCP 协议、Plugin 插件系统、Hooks 事件机制和五级渐进式上下文压缩。
 
 ## 为什么做这个
 
@@ -38,9 +38,10 @@ TUI 渲染（Ink + React）
 - **Plugin 系统**：一个插件 = 一个目录，打包 tools + skills + MCP + hooks，支持安装/卸载/启禁用
 - **Hooks 事件**：在工具调用前/后插入自定义逻辑（审批、日志、修改等）
 - **Skills 技能**：Markdown 格式的操作指南，模型按需激活，延迟加载
+- **多 Agent 子代理**：模型可调用 `agent` 工具派出独立子代理处理子任务，支持指定模型和工具白名单
 - **上下文压缩**：五级渐进式压缩管线（预算截断 → 头部裁剪 → 微压缩 → 折叠摘要 → 全量摘要），自动管理长对话上下文
 - **流式输出**：模型响应边生成边显示
-- **自主多轮**：模型可连续调用工具（最多 50 轮），自主完成复杂任务
+- **自主多轮**：模型可连续调用工具（默认最多 50 轮），自主完成复杂任务
 - **对话持久化**：自动保存会话到磁盘，支持 `--resume` 恢复
 - **任意模型**：兼容所有 OpenAI API 格式的模型服务（OpenAI / DeepSeek / 硅基流动 / Ollama 等）
 - **终端 TUI**：基于 Ink + React 的交互界面
@@ -75,6 +76,9 @@ MODEL_NAME=gpt-4o
 
 # 可选：单次提问内工具循环最大轮次（默认 50）
 MAX_TURNS=50
+
+# 可选：子代理最大轮次（默认 30）
+SUBAGENT_MAX_TURNS=30
 
 # 可选：上下文窗口大小（默认 128000）
 CONTEXT_WINDOW_TOKENS=128000
@@ -165,7 +169,8 @@ npm start -- --list
 │       ├── readTool.ts          # 内置：文件读取
 │       ├── writeTool.ts         # 内置：文件写入
 │       ├── bashTool.ts          # 内置：Shell 命令执行
-│       └── skillTool.ts         # use_skill 工具（模型主动调用 skill）
+│       ├── skillTool.ts         # use_skill 工具（模型主动调用 skill）
+│       └── agentTool.ts        # agent 工具（派出独立子代理）
 ```
 
 ## 设计解读
@@ -212,7 +217,7 @@ REPL (React state)          queryLoop                    OpenAI API
 | 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 五级渐进式压缩管线 |
 | API 支持 | Anthropic / AWS Bedrock / Google Vertex | 任意 OpenAI 兼容 |
 | 权限系统 | 精细的工具权限审批 | 无限制 |
-| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + Plugin + Skill + Hooks |
+| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + Plugin + Skill + Hooks + Sub-Agent |
 | 会话恢复 | 支持 (`--resume`) | 支持 (`--resume`) |
 
 ## 自定义工具
@@ -616,10 +621,55 @@ CONTEXT_WINDOW_TOKENS=128000
 COMPACT_MODEL=gpt-4o-mini
 ```
 
+## 多 Agent 子代理
+
+模型可通过 `agent` 工具派出独立的子代理来处理子任务。子代理拥有自己的对话上下文，执行完毕后将结果返回给父会话。
+
+### 工作原理
+
+```
+父会话 queryLoop
+    │
+    ├── 模型输出: tool_use: agent({ prompt: "...", model: "..." })
+    │
+    ▼
+agentTool.call()
+    │
+    ├── 过滤工具集（去掉 agent 自身，防递归）
+    ├── 构建子代理 system prompt
+    ├── 启动独立 queryLoop（空 history）
+    │     ├── 子代理调用工具...
+    │     └── 子代理输出最终文本
+    │
+    ▼
+结果作为 tool_result 回到父会话
+```
+
+### agent 工具参数
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `prompt` | `string` (必填) | 交给子代理的详细任务描述 |
+| `description` | `string` (可选) | 3-5 词简短标题 |
+| `model` | `string` (可选) | 子代理使用的模型（如 `gpt-4o-mini`），不传则与父相同 |
+| `allowed_tools` | `string[]` (可选) | 工具白名单，不传则使用全部可用工具 |
+
+### 使用场景
+
+- **任务分解**：将复杂任务拆成多个子任务，分别由子代理执行
+- **探索/研究**：派子代理阅读代码、搜索文件，父代理继续当前任务
+- **成本优化**：让子代理使用更便宜的模型处理简单子任务
+
+### 安全机制
+
+- **防递归**：子代理的工具集中自动去掉 `agent` 工具，只允许一层嵌套
+- **独立轮次上限**：子代理默认最多 30 轮（`SUBAGENT_MAX_TURNS`），独立于父
+- **独立上下文**：子代理从空 history 开始，不共享父的对话历史
+
 ### 更多扩展方向
 
 - 工具权限审批机制
-- 多 Agent 协同
+- 异步子代理 + 通知机制
 - 图片/PDF 多模态输入
 
 ## 依赖

@@ -9,11 +9,17 @@ function getMaxTurns(): number {
   return parseInt(process.env.MAX_TURNS ?? '50', 10)
 }
 
+function getSubAgentMaxTurns(): number {
+  return parseInt(process.env.SUBAGENT_MAX_TURNS ?? '30', 10)
+}
+
 export interface QueryParams {
   userMessage: string
   history: Message[]
   tools: Tool[]
   systemPrompt: string
+  model?: string
+  isSubAgent?: boolean
 }
 
 /**
@@ -36,7 +42,7 @@ export async function* queryLoop(
 
   let turnCount = 0
 
-  const maxTurns = getMaxTurns()
+  const maxTurns = params.isSubAgent ? getSubAgentMaxTurns() : getMaxTurns()
 
   while (turnCount < maxTurns) {
     turnCount++
@@ -54,7 +60,7 @@ export async function* queryLoop(
 
     let assistantMsg: AssistantMessage | undefined
     try {
-      const gen = callModelStreaming(messages, tools)
+      const gen = callModelStreaming(messages, tools, { model: params.model })
 
       while (true) {
         const { value, done } = await gen.next()

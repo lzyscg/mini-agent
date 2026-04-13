@@ -77,6 +77,12 @@ export function REPL({ tools, resumeSessionId }: REPLProps) {
             case 'context_compressed':
               break
 
+            case 'subagent_start':
+              break
+
+            case 'subagent_end':
+              break
+
             case 'turn_complete': {
               const finalMessages = event.messages.filter(
                 (m) => m.role !== 'system',

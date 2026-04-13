@@ -3,3 +3,4 @@ dist/
 .mini-agent/
 .env
 *.env.local
+mcp.json

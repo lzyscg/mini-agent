@@ -8,6 +8,7 @@
     "dev": "tsx watch src/cli.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.7",
     "ink": "^5.1.0",
     "openai": "^4.82.0",

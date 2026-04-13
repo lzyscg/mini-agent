@@ -6,13 +6,17 @@ import { REPL } from './REPL.js'
 interface AppProps {
   tools: Tool[]
   skillCount: number
+  mcpServerCount: number
   resumeSessionId?: string
 }
 
-export function App({ tools, skillCount, resumeSessionId }: AppProps) {
+export function App({ tools, skillCount, mcpServerCount, resumeSessionId }: AppProps) {
   const parts = [`${tools.length} tools`]
   if (skillCount > 0) {
     parts.push(`${skillCount} skills`)
+  }
+  if (mcpServerCount > 0) {
+    parts.push(`${mcpServerCount} MCP`)
   }
 
   return (

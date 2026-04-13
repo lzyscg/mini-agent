@@ -1,6 +1,6 @@
 # Mini Agent
 
-一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **16 个源文件、6 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环。
+一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **17 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议接入外部工具生态。
 
 ## 为什么做这个
 
@@ -34,6 +34,8 @@ TUI 渲染（Ink + React）
 
 - **工具闭环**：内置读文件 (`read_file`)、写文件 (`write_file`)、执行命令 (`bash`)
 - **工具扩展**：在 `tools/` 目录放入 `.ts` 文件即可自动加载自定义工具，零配置
+- **MCP 协议**：通过 `mcp.json` 配置即可接入任意 MCP Server（GitHub、数据库、浏览器等）
+- **Skills 技能**：Markdown 格式的操作指南，模型按需激活，延迟加载
 - **流式输出**：模型响应边生成边显示
 - **自主多轮**：模型可连续调用工具（最多 50 轮），自主完成复杂任务
 - **对话持久化**：自动保存会话到磁盘，支持 `--resume` 恢复
@@ -100,6 +102,8 @@ npm start -- --list
 ## 项目结构
 
 ```
+├── mcp.json                     # ← MCP 服务器配置（已 gitignore，含密钥）
+├── mcp.json.example             #   MCP 配置示例
 ├── tools/                       # ← 自定义工具放这里（自动加载）
 │   ├── _template.ts             #   工具开发模板（_开头的文件会被忽略）
 │   └── fetchTool.ts             #   示例：HTTP 请求工具
@@ -110,7 +114,7 @@ npm start -- --list
 │   └── project-init.md          #   示例：项目初始化指引
 ├── src/
 │   ├── cli.ts                   # 入口：参数解析 + 环境验证
-│   ├── main.tsx                 # Ink 渲染入口
+│   ├── main.tsx                 # Ink 渲染入口（加载工具 + MCP + skill）
 │   ├── prompts.ts               # 系统提示词（动态列出已加载工具）
 │   ├── storage.ts               # 会话持久化（JSON 文件）
 │   ├── types.ts                 # 核心类型定义
@@ -125,6 +129,7 @@ npm start -- --list
 │   │   ├── messagePipeline.ts   # 消息组装 + 截断
 │   │   ├── toolRunner.ts        # 工具调度（读写分离并发）
 │   │   ├── toolLoader.ts        # 工具动态加载器
+│   │   ├── mcpClient.ts         # MCP 客户端（连接 + 工具翻译）
 │   │   └── skillLoader.ts       # Skill 元数据加载 + 延迟内容读取
 │   └── tools/
 │       ├── types.ts             # Tool 接口定义
@@ -178,7 +183,7 @@ REPL (React state)          queryLoop                    OpenAI API
 | 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 消息数量滑动窗口 |
 | API 支持 | Anthropic / AWS Bedrock / Google Vertex | 任意 OpenAI 兼容 |
 | 权限系统 | 精细的工具权限审批 | 无限制 |
-| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | 自定义 Tool + Skill-as-Tool |
+| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + 自定义 Tool + Skill-as-Tool |
 | 会话恢复 | 支持 (`--resume`) | 支持 (`--resume`) |
 
 ## 自定义工具
@@ -338,11 +343,98 @@ When the user asks about this topic, follow these guidelines:
 | Code Review | 代码审查流程 | 系统化的代码审查方法论 |
 | Project Init | 项目初始化指引 | 新项目脚手架的最佳实践 |
 
+## MCP 协议支持
+
+Mini Agent 支持 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/)，让你通过配置文件接入任意 MCP Server 提供的工具，无需编写代码。
+
+### 工作原理
+
+```
+启动 → 读取 mcp.json → 连接各 MCP Server (stdio)
+                │
+                ▼
+         MCP tools/list → 获取服务器提供的工具列表
+                │
+                ▼
+         翻译为 Tool 接口 → name: mcp__<server>__<tool>
+                │
+                ▼
+         合并到 tools 数组 → 对 queryLoop 完全透明
+```
+
+MCP 工具和内置工具、自定义工具走完全相同的 pipeline。模型看到的就是一组统一的 tools，不区分来源。
+
+### 快速配置
+
+1. 复制配置模板：
+
+```bash
+cp mcp.json.example mcp.json
+```
+
+2. 编辑 `mcp.json`，配置你需要的 MCP Server：
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"
+      }
+    }
+  }
+}
+```
+
+3. 重启 agent — 启动时显示连接状态和工具列表
+
+### 配置格式
+
+```json
+{
+  "mcpServers": {
+    "<server-name>": {
+      "command": "可执行命令",
+      "args": ["参数列表"],
+      "env": { "环境变量": "值" },
+      "cwd": "工作目录（可选）",
+      "disabled": false
+    }
+  }
+}
+```
+
+### 配置目录
+
+| 路径 | 用途 |
+|---|---|
+| `mcp.json` | 项目级（已 gitignore，含密钥） |
+| `.mini-agent/mcp.json` | 用户级（同样不跟踪） |
+
+两个配置会被合并，后者优先覆盖同名 server。
+
+### 常用 MCP Server 示例
+
+| Server | 安装命令 | 提供的能力 |
+|---|---|---|
+| GitHub | `npx -y @modelcontextprotocol/server-github` | 仓库管理、Issue、PR |
+| Filesystem | `npx -y @modelcontextprotocol/server-filesystem /path` | 安全的文件系统访问 |
+| SQLite | `npx -y @modelcontextprotocol/server-sqlite db.sqlite` | 数据库查询 |
+| Puppeteer | `npx -y @modelcontextprotocol/server-puppeteer` | 浏览器自动化 |
+| PostgreSQL | `npx -y @modelcontextprotocol/server-postgres` | PostgreSQL 查询 |
+
+更多 MCP Server 可在 [MCP Servers 仓库](https://github.com/modelcontextprotocol/servers) 查找。
+
+### 工具命名
+
+MCP 工具会自动加上命名空间前缀：`mcp__<server名>__<工具名>`。例如 GitHub server 的 `create_issue` 工具在 agent 中名为 `mcp__github__create_issue`。
+
 ### 更多扩展方向
 
 - Token 级别的上下文压缩
 - 工具权限审批机制
-- MCP 协议支持
 - 多 Agent 协同
 - 图片/PDF 多模态输入
 
@@ -352,6 +444,7 @@ When the user asks about this topic, follow these guidelines:
 |---|---|
 | `ink` + `react` | 终端 TUI 渲染 |
 | `openai` | API 客户端 |
+| `@modelcontextprotocol/sdk` | MCP 协议客户端 |
 | `dotenv` | 环境变量加载 |
 | `zod` | 参数校验 |
 | `tsx` | 直接运行 TypeScript (dev) |

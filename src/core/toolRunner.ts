@@ -1,8 +1,10 @@
 import type { ToolCall, ToolResultMessage } from '../types.js'
 import type { Tool } from '../tools/types.js'
+import { hookBus } from './hooks.js'
+import type { BeforeToolCallContext, AfterToolCallContext } from './hooks.js'
 
 /**
- * Execute a single tool call and return the result message.
+ * Execute a single tool call with before/after hooks.
  */
 async function executeTool(
   toolCall: ToolCall,
@@ -29,19 +31,47 @@ async function executeTool(
     }
   }
 
+  // ── before_tool_call hook ──
+  const beforeCtx: BeforeToolCallContext = {
+    toolName: tool.name,
+    args,
+    aborted: false,
+  }
+  await hookBus.emit({ event: 'before_tool_call', data: beforeCtx })
+
+  if (beforeCtx.aborted) {
+    return {
+      role: 'tool',
+      tool_call_id: toolCall.id,
+      content: beforeCtx.abortReason ?? `Tool "${tool.name}" was blocked by a hook.`,
+    }
+  }
+
+  // ── Execute ──
+  const startTime = Date.now()
+  let result: string
+
   try {
-    const result = await tool.call(args)
-    return {
-      role: 'tool',
-      tool_call_id: toolCall.id,
-      content: result,
-    }
+    result = await tool.call(args)
   } catch (err) {
-    return {
-      role: 'tool',
-      tool_call_id: toolCall.id,
-      content: `Error executing ${tool.name}: ${(err as Error).message}`,
-    }
+    result = `Error executing ${tool.name}: ${(err as Error).message}`
+  }
+
+  const durationMs = Date.now() - startTime
+
+  // ── after_tool_call hook ──
+  const afterCtx: AfterToolCallContext = {
+    toolName: tool.name,
+    args,
+    result,
+    durationMs,
+  }
+  await hookBus.emit({ event: 'after_tool_call', data: afterCtx })
+
+  return {
+    role: 'tool',
+    tool_call_id: toolCall.id,
+    content: result,
   }
 }
 
@@ -57,7 +87,6 @@ export async function runTools(
 ): Promise<ToolResultMessage[]> {
   const results: ToolResultMessage[] = []
 
-  // Partition into read-only and write groups (preserving order)
   const readOnlyCalls: ToolCall[] = []
   const writeCalls: ToolCall[] = []
 
@@ -76,7 +105,6 @@ export async function runTools(
     }
   }
 
-  // Run read-only tools concurrently
   if (readOnlyCalls.length > 0) {
     const readResults = await Promise.all(
       readOnlyCalls.map(async (tc) => {
@@ -89,7 +117,6 @@ export async function runTools(
     results.push(...readResults)
   }
 
-  // Run write tools sequentially
   for (const tc of writeCalls) {
     onToolStart?.(tc)
     const result = await executeTool(tc, tools)

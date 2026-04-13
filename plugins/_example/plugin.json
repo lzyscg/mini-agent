@@ -1,0 +1,11 @@
+{
+  "name": "example-plugin",
+  "version": "1.0.0",
+  "description": "A minimal example plugin demonstrating tools, skills, and hooks",
+  "author": "mini-agent",
+  "tools": "tools/",
+  "skills": "skills/",
+  "hooks": {
+    "after_tool_call": "hooks/logToolCall.ts"
+  }
+}

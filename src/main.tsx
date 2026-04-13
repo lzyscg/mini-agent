@@ -5,18 +5,30 @@ import { loadAllTools } from './core/toolLoader.js'
 import { loadAllSkillMeta } from './core/skillLoader.js'
 import { createSkillTool } from './tools/skillTool.js'
 import { loadMcpTools, closeMcpConnections } from './core/mcpClient.js'
+import { loadAllPlugins } from './core/pluginLoader.js'
 
 export async function startApp(resumeSessionId?: string) {
-  const [builtinTools, skillMetas, mcpResult] = await Promise.all([
+  // Load all extensions in parallel
+  const [builtinTools, skillMetas, pluginResult] = await Promise.all([
     loadAllTools(),
     loadAllSkillMeta(),
-    loadMcpTools(),
+    loadAllPlugins(),
   ])
 
-  const tools = [...builtinTools, ...mcpResult.tools]
+  // Merge plugin MCP configs with file-based config, then connect
+  const mcpResult = await loadMcpTools(
+    Object.keys(pluginResult.mcpServers).length > 0
+      ? pluginResult.mcpServers
+      : undefined,
+  )
 
-  if (skillMetas.length > 0) {
-    tools.push(createSkillTool(skillMetas))
+  // Assemble tools: builtin + custom → plugin tools → MCP tools
+  const tools = [...builtinTools, ...pluginResult.tools, ...mcpResult.tools]
+
+  // Merge skills: directory skills + plugin skills
+  const allSkillMetas = [...skillMetas, ...pluginResult.skillMetas]
+  if (allSkillMetas.length > 0) {
+    tools.push(createSkillTool(allSkillMetas))
   }
 
   // Clean up MCP connections on exit
@@ -28,8 +40,9 @@ export async function startApp(resumeSessionId?: string) {
   const { waitUntilExit } = render(
     <App
       tools={tools}
-      skillCount={skillMetas.length}
+      skillCount={allSkillMetas.length}
       mcpServerCount={mcpResult.serverCount}
+      pluginCount={pluginResult.plugins.length}
       resumeSessionId={resumeSessionId}
     />,
   )

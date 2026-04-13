@@ -22,7 +22,7 @@ function getCustomToolDirs(): string[] {
   ]
 }
 
-function validateTool(obj: unknown, filePath: string): Tool | null {
+export function validateTool(obj: unknown, filePath: string): Tool | null {
   if (!obj || typeof obj !== 'object') return null
   const t = obj as Record<string, unknown>
 
@@ -50,7 +50,7 @@ function validateTool(obj: unknown, filePath: string): Tool | null {
   return t as unknown as Tool
 }
 
-async function loadToolsFromDir(dir: string): Promise<Tool[]> {
+export async function loadToolsFromDir(dir: string): Promise<Tool[]> {
   const tools: Tool[] = []
 
   let entries: string[]

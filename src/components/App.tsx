@@ -7,17 +7,15 @@ interface AppProps {
   tools: Tool[]
   skillCount: number
   mcpServerCount: number
+  pluginCount: number
   resumeSessionId?: string
 }
 
-export function App({ tools, skillCount, mcpServerCount, resumeSessionId }: AppProps) {
+export function App({ tools, skillCount, mcpServerCount, pluginCount, resumeSessionId }: AppProps) {
   const parts = [`${tools.length} tools`]
-  if (skillCount > 0) {
-    parts.push(`${skillCount} skills`)
-  }
-  if (mcpServerCount > 0) {
-    parts.push(`${mcpServerCount} MCP`)
-  }
+  if (skillCount > 0) parts.push(`${skillCount} skills`)
+  if (mcpServerCount > 0) parts.push(`${mcpServerCount} MCP`)
+  if (pluginCount > 0) parts.push(`${pluginCount} plugins`)
 
   return (
     <Box flexDirection="column">

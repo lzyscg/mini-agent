@@ -64,7 +64,7 @@ function parseTriggers(raw: string): string[] {
     .filter(Boolean)
 }
 
-async function loadMetaFromDir(dir: string): Promise<SkillMeta[]> {
+export async function loadMetaFromDir(dir: string): Promise<SkillMeta[]> {
   const metas: SkillMeta[] = []
 
   let entries: string[]

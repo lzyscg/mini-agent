@@ -6,7 +6,7 @@ import type { Tool } from '../tools/types.js'
 
 // ── Config types ──
 
-interface McpServerConfig {
+export interface McpServerConfig {
   /** Executable command to start the MCP server */
   command: string
   /** Arguments passed to the command */
@@ -154,9 +154,15 @@ export interface McpLoadResult {
 /**
  * Load MCP config, connect to all servers, and return translated tools.
  * Failed connections are skipped gracefully.
+ * @param extraServers Additional MCP server configs (e.g. from plugins)
  */
-export async function loadMcpTools(): Promise<McpLoadResult> {
+export async function loadMcpTools(
+  extraServers?: Record<string, McpServerConfig>,
+): Promise<McpLoadResult> {
   const config = await loadMcpConfig()
+  if (extraServers) {
+    Object.assign(config.mcpServers, extraServers)
+  }
   const entries = Object.entries(config.mcpServers).filter(
     ([, cfg]) => !cfg.disabled,
   )

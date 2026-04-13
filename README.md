@@ -1,6 +1,6 @@
 # Mini Agent
 
-一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **17 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议接入外部工具生态。
+一个最小化的终端 AI 编程助手，从 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) 架构中提炼核心设计，用 **~20 个源文件、7 个依赖** 实现完整的 "思考 → 行动 → 观察" Agent 闭环，支持 MCP 协议、Plugin 插件系统和 Hooks 事件机制。
 
 ## 为什么做这个
 
@@ -35,6 +35,8 @@ TUI 渲染（Ink + React）
 - **工具闭环**：内置读文件 (`read_file`)、写文件 (`write_file`)、执行命令 (`bash`)
 - **工具扩展**：在 `tools/` 目录放入 `.ts` 文件即可自动加载自定义工具，零配置
 - **MCP 协议**：通过 `mcp.json` 配置即可接入任意 MCP Server（GitHub、数据库、浏览器等）
+- **Plugin 系统**：一个插件 = 一个目录，打包 tools + skills + MCP + hooks，支持安装/卸载/启禁用
+- **Hooks 事件**：在工具调用前/后插入自定义逻辑（审批、日志、修改等）
 - **Skills 技能**：Markdown 格式的操作指南，模型按需激活，延迟加载
 - **流式输出**：模型响应边生成边显示
 - **自主多轮**：模型可连续调用工具（最多 50 轮），自主完成复杂任务
@@ -112,9 +114,15 @@ npm start -- --list
 │   ├── git-workflow.md          #   示例：Git 操作规范
 │   ├── code-review.md           #   示例：代码审查流程
 │   └── project-init.md          #   示例：项目初始化指引
+├── plugins/                     # ← 插件放这里（_开头的被忽略）
+│   └── _example/                #   示例插件
+│       ├── plugin.json          #     插件清单
+│       ├── tools/helloTool.ts   #     插件提供的工具
+│       ├── skills/greeting.md   #     插件提供的 skill
+│       └── hooks/logToolCall.ts #     插件提供的 hook
 ├── src/
-│   ├── cli.ts                   # 入口：参数解析 + 环境验证
-│   ├── main.tsx                 # Ink 渲染入口（加载工具 + MCP + skill）
+│   ├── cli.ts                   # 入口：参数解析 + plugin 子命令
+│   ├── main.tsx                 # Ink 渲染入口（加载全部扩展）
 │   ├── prompts.ts               # 系统提示词（动态列出已加载工具）
 │   ├── storage.ts               # 会话持久化（JSON 文件）
 │   ├── types.ts                 # 核心类型定义
@@ -127,10 +135,13 @@ npm start -- --list
 │   │   ├── queryLoop.ts         # 核心 Agent 循环（AsyncGenerator）
 │   │   ├── openaiAdapter.ts     # OpenAI API 流式适配
 │   │   ├── messagePipeline.ts   # 消息组装 + 截断
-│   │   ├── toolRunner.ts        # 工具调度（读写分离并发）
+│   │   ├── toolRunner.ts        # 工具调度（读写分离 + hooks 集成）
 │   │   ├── toolLoader.ts        # 工具动态加载器
 │   │   ├── mcpClient.ts         # MCP 客户端（连接 + 工具翻译）
-│   │   └── skillLoader.ts       # Skill 元数据加载 + 延迟内容读取
+│   │   ├── skillLoader.ts       # Skill 元数据加载 + 延迟内容读取
+│   │   ├── pluginLoader.ts      # 插件发现 + 清单解析 + 组件加载
+│   │   ├── pluginManager.ts     # 插件安装/卸载/启禁用 CLI 操作
+│   │   └── hooks.ts             # Hook 类型定义 + 事件总线
 │   └── tools/
 │       ├── types.ts             # Tool 接口定义
 │       ├── readTool.ts          # 内置：文件读取
@@ -183,7 +194,7 @@ REPL (React state)          queryLoop                    OpenAI API
 | 上下文管理 | 四级压缩 (snip/micro/collapse/autocompact) | 消息数量滑动窗口 |
 | API 支持 | Anthropic / AWS Bedrock / Google Vertex | 任意 OpenAI 兼容 |
 | 权限系统 | 精细的工具权限审批 | 无限制 |
-| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + 自定义 Tool + Skill-as-Tool |
+| 扩展机制 | MCP / Plugin / Skill / Agent Swarm | MCP + Plugin + Skill + Hooks |
 | 会话恢复 | 支持 (`--resume`) | 支持 (`--resume`) |
 
 ## 自定义工具
@@ -430,6 +441,114 @@ cp mcp.json.example mcp.json
 ### 工具命名
 
 MCP 工具会自动加上命名空间前缀：`mcp__<server名>__<工具名>`。例如 GitHub server 的 `create_issue` 工具在 agent 中名为 `mcp__github__create_issue`。
+
+## Plugin 插件系统
+
+Plugin 是 tools + skills + MCP + hooks 的打包单元。一个插件 = 一个目录 + `plugin.json` 清单。
+
+### 快速上手
+
+```bash
+# 安装插件（从本地路径）
+npm start -- plugin add ./path/to/my-plugin
+
+# 安装插件（从 git 仓库）
+npm start -- plugin add https://github.com/user/my-plugin.git
+
+# 查看已安装插件
+npm start -- plugin list
+
+# 启用/禁用
+npm start -- plugin enable my-plugin
+npm start -- plugin disable my-plugin
+
+# 卸载
+npm start -- plugin remove my-plugin
+```
+
+### plugin.json 格式
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "插件描述",
+  "author": "your-name",
+  "tools": "tools/",
+  "skills": "skills/",
+  "mcpServers": "mcp.json",
+  "hooks": {
+    "session_start": "hooks/onStart.ts",
+    "before_tool_call": "hooks/beforeTool.ts",
+    "after_tool_call": "hooks/afterTool.ts"
+  }
+}
+```
+
+所有字段除 `name` 外均可选。路径相对于插件目录。
+
+### 插件目录
+
+| 路径 | 用途 | git 跟踪 |
+|---|---|---|
+| `plugins/` | 项目级插件 | 是 |
+| `.mini-agent/plugins/` | 用户级/已安装插件 | 否 |
+
+以 `_` 开头的插件目录会被忽略（如 `_example`）。
+
+### 插件能提供什么
+
+| 组件 | 插件中的位置 | 合并到 |
+|---|---|---|
+| Tools | `tools/*.ts` | 全局 tools 数组 |
+| Skills | `skills/*.md` | use_skill 工具 |
+| MCP Servers | `mcp.json` | MCP 连接池 |
+| Hooks | `hooks/*.ts` | 事件总线 |
+
+### 创建插件
+
+参考 `plugins/_example/` 示例：
+
+```
+my-plugin/
+  plugin.json
+  tools/
+    myTool.ts
+  skills/
+    mySkill.md
+  hooks/
+    logToolCall.ts
+```
+
+## Hooks 事件系统
+
+Hooks 允许在特定事件点插入自定义逻辑，主要通过 Plugin 注册。
+
+### 事件类型
+
+| 事件 | 触发时机 | 可以做什么 |
+|---|---|---|
+| `session_start` | 会话开始 | 注入初始上下文 |
+| `before_tool_call` | 工具执行前 | 修改参数、阻止执行 |
+| `after_tool_call` | 工具执行后 | 记录日志、统计耗时 |
+
+### Hook 文件格式
+
+```typescript
+import type { HookContext } from '../../../src/core/hooks.js'
+
+export default async function(ctx: HookContext): Promise<void> {
+  if (ctx.event === 'before_tool_call') {
+    // ctx.data.toolName, ctx.data.args
+    // 设置 ctx.data.aborted = true 可阻止工具执行
+  }
+
+  if (ctx.event === 'after_tool_call') {
+    // ctx.data.toolName, ctx.data.result, ctx.data.durationMs
+    console.log(`Tool ${ctx.data.toolName} took ${ctx.data.durationMs}ms`)
+  }
+}
+```
 
 ### 更多扩展方向
 

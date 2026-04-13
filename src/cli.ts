@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { startApp } from './main.js'
 import { getLatestConversationId, listConversations } from './storage.js'
+import { handlePluginCommand } from './core/pluginManager.js'
 
 function validateEnv() {
   if (!process.env.OPENAI_API_KEY) {
@@ -26,7 +27,6 @@ function parseArgs(): { resume: boolean; sessionId?: string } {
       ? args.indexOf('--resume')
       : args.indexOf('-r')
     const nextArg = args[idx + 1]
-    // If next arg exists and isn't another flag, treat it as session ID
     const explicitId = nextArg && !nextArg.startsWith('-') ? nextArg : undefined
     return { resume: true, sessionId: explicitId }
   }
@@ -35,7 +35,6 @@ function parseArgs(): { resume: boolean; sessionId?: string } {
     return { resume: false, sessionId: '__list__' }
   }
 
-  // Default: new session
   return { resume: false }
 }
 
@@ -55,6 +54,14 @@ async function showConversationList() {
 }
 
 async function main() {
+  const args = process.argv.slice(2)
+
+  // Handle plugin subcommands (don't require API key)
+  if (args[0] === 'plugin') {
+    const handled = await handlePluginCommand(args)
+    if (handled) process.exit(0)
+  }
+
   validateEnv()
 
   const { resume, sessionId } = parseArgs()
@@ -68,7 +75,6 @@ async function main() {
 
   if (resume) {
     if (sessionId) {
-      // Try to match partial ID
       const conversations = await listConversations()
       const match = conversations.find((c) => c.id.startsWith(sessionId))
       if (match) {
